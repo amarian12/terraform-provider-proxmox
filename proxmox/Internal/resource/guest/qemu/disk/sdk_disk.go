@@ -2,13 +2,14 @@ package disk
 
 import (
 	pveAPI "github.com/Telmate/proxmox-api-go/proxmox"
+	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/helper/size"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 )
 
 func sdk_Disk_QemuCdRom(slot string, schema map[string]interface{}) (*pveAPI.QemuCdRom, diag.Diagnostics) {
 	diags := warningsCdromAndCloudinit(slot, schemaCdRom, schema)
 	if schema[schemaStorage].(string) != "" {
-		diags = append(diags, warningDisk(slot, schemaStorage, schemaType, schemaCdRom, ""))
+		diags = append(diags, warningDisk(slot, schemaStorage, schemaType, enumCdRom, ""))
 	}
 	if schema[schemaPassthrough].(bool) {
 		return &pveAPI.QemuCdRom{Passthrough: true}, diags
@@ -19,10 +20,10 @@ func sdk_Disk_QemuCdRom(slot string, schema map[string]interface{}) (*pveAPI.Qem
 func sdk_Disk_QemuCloudInit(slot string, schema map[string]interface{}) (*pveAPI.QemuCloudInitDisk, diag.Diagnostics) {
 	diags := warningsCdromAndCloudinit(slot, schemaCloudInit, schema)
 	if schema[schemaISO].(string) != "" {
-		diags = append(diags, warningDisk(slot, schemaISO, schemaType, schemaCloudInit, ""))
+		diags = append(diags, warningDisk(slot, schemaISO, schemaType, enumCloudInit, ""))
 	}
 	if schema[schemaPassthrough].(bool) {
-		diags = append(diags, warningDisk(slot, schemaPassthrough, schemaType, schemaCloudInit, ""))
+		diags = append(diags, warningDisk(slot, schemaPassthrough, schemaType, enumCloudInit, ""))
 	}
 	return &pveAPI.QemuCloudInitDisk{
 		Format:  pveAPI.QemuDiskFormat_Raw,
@@ -67,13 +68,14 @@ func sdk_Disk_QemuIdeDisks(ide *pveAPI.QemuIdeDisks, id string, schema map[strin
 
 func sdk_Disk_QemuIdeStorage(ide *pveAPI.QemuIdeStorage, schema map[string]interface{}, id string) (diags diag.Diagnostics) {
 	slot := schemaIDE + id
-	if ide.CdRom != nil || ide.Disk != nil || ide.Passthrough != nil || ide.CloudInit != nil {
+	if !ide.Delete {
 		return errorDiskSlotDuplicate(slot)
 	}
+	ide.Delete = false
 	switch schema[schemaType].(string) {
-	case schemaDisk:
+	case enumDisk:
 		if schema[schemaIOthread].(bool) {
-			diags = append(diags, warningDisk(slot, schemaIOthread, schemaSlot, slot, ""))
+			diags = diag.Diagnostics{warningDisk(slot, schemaIOthread, schemaSlot, slot, "")}
 		}
 		if schema[schemaISO].(string) != "" {
 			diags = append(diags, warningDisk(slot, schemaISO, schemaSlot, slot, ""))
@@ -112,13 +114,15 @@ func sdk_Disk_QemuIdeStorage(ide *pveAPI.QemuIdeStorage, schema map[string]inter
 			ide.Disk.Storage, tmpDiags = sdk_Disk_Storage(slot, schema)
 			diags = append(diags, tmpDiags...)
 			if schema[schemaDiskFile].(string) != "" {
-				diags = append(diags, warningDisk(slot, schemaDiskFile, schemaType, schemaDisk, ""))
+				diags = append(diags, warningDisk(slot, schemaDiskFile, schemaType, enumDisk, ""))
 			}
 		}
-	case schemaCdRom:
+	case enumCdRom:
 		ide.CdRom, diags = sdk_Disk_QemuCdRom(slot, schema)
-	case schemaCloudInit:
+	case enumCloudInit:
 		ide.CloudInit, diags = sdk_Disk_QemuCloudInit(slot, schema)
+	case enumIgnore:
+		return WarningIgnore(slot, schema)
 	}
 	return
 }
@@ -143,13 +147,14 @@ func sdk_Disk_QemuSataDisks(sata *pveAPI.QemuSataDisks, id string, schema map[st
 
 func sdk_Disk_QemuSataStorage(sata *pveAPI.QemuSataStorage, schema map[string]interface{}, id string) (diags diag.Diagnostics) {
 	slot := schemaSata + id
-	if sata.CdRom != nil || sata.Disk != nil || sata.Passthrough != nil || sata.CloudInit != nil {
+	if !sata.Delete {
 		return errorDiskSlotDuplicate(slot)
 	}
+	sata.Delete = false
 	switch schema[schemaType].(string) {
-	case schemaDisk:
+	case enumDisk:
 		if schema[schemaIOthread].(bool) {
-			diags = append(diags, warningDisk(slot, schemaIOthread, schemaSlot, slot, ""))
+			diags = diag.Diagnostics{warningDisk(slot, schemaIOthread, schemaSlot, slot, "")}
 		}
 		if schema[schemaISO].(string) != "" {
 			diags = append(diags, warningDisk(slot, schemaISO, schemaSlot, slot, ""))
@@ -188,13 +193,15 @@ func sdk_Disk_QemuSataStorage(sata *pveAPI.QemuSataStorage, schema map[string]in
 			sata.Disk.Storage, tmpDiags = sdk_Disk_Storage(slot, schema)
 			diags = append(diags, tmpDiags...)
 			if schema[schemaDiskFile].(string) != "" {
-				diags = append(diags, warningDisk(slot, schemaDiskFile, schemaType, schemaDisk, ""))
+				diags = append(diags, warningDisk(slot, schemaDiskFile, schemaType, enumDisk, ""))
 			}
 		}
-	case schemaCdRom:
+	case enumCdRom:
 		sata.CdRom, diags = sdk_Disk_QemuCdRom(slot, schema)
-	case schemaCloudInit:
+	case enumCloudInit:
 		sata.CloudInit, diags = sdk_Disk_QemuCloudInit(slot, schema)
+	case enumIgnore:
+		return WarningIgnore(slot, schema)
 	}
 	return
 }
@@ -269,13 +276,14 @@ func sdk_Disk_QemuScsiDisks(scsi *pveAPI.QemuScsiDisks, id string, schema map[st
 
 func sdk_Disk_QemuScsiStorage(scsi *pveAPI.QemuScsiStorage, schema map[string]interface{}, id string) (diags diag.Diagnostics) {
 	slot := schemaScsi + id
-	if scsi.CdRom != nil || scsi.Disk != nil || scsi.Passthrough != nil || scsi.CloudInit != nil {
+	if !scsi.Delete {
 		return errorDiskSlotDuplicate(slot)
 	}
+	scsi.Delete = false
 	switch schema[schemaType].(string) {
-	case schemaDisk:
+	case enumDisk:
 		if schema[schemaISO].(string) != "" {
-			diags = append(diags, warningDisk(slot, schemaISO, schemaSlot, slot, ""))
+			diags = diag.Diagnostics{warningDisk(slot, schemaISO, schemaSlot, slot, "")}
 		}
 		if schema[schemaPassthrough].(bool) { // passthrough disk
 			scsi.Passthrough = &pveAPI.QemuScsiPassthrough{
@@ -312,26 +320,29 @@ func sdk_Disk_QemuScsiStorage(scsi *pveAPI.QemuScsiStorage, schema map[string]in
 			scsi.Disk.Storage, tmpDiags = sdk_Disk_Storage(slot, schema)
 			diags = append(diags, tmpDiags...)
 			if schema[schemaDiskFile].(string) != "" {
-				diags = append(diags, warningDisk(slot, schemaDiskFile, schemaType, schemaDisk, ""))
+				diags = append(diags, warningDisk(slot, schemaDiskFile, schemaType, enumDisk, ""))
 			}
 		}
-	case schemaCdRom:
+	case enumCdRom:
 		scsi.CdRom, diags = sdk_Disk_QemuCdRom(slot, schema)
-	case schemaCloudInit:
+	case enumCloudInit:
 		scsi.CloudInit, diags = sdk_Disk_QemuCloudInit(slot, schema)
+	case enumIgnore:
+		return WarningIgnore(slot, schema)
 	}
 	return
 }
 
 func sdk_Disk_QemuVirtIOStorage(virtio *pveAPI.QemuVirtIOStorage, schema map[string]interface{}, id string) (diags diag.Diagnostics) {
 	slot := schemaVirtIO + id
-	if virtio.CdRom != nil || virtio.Disk != nil || virtio.Passthrough != nil || virtio.CloudInit != nil {
+	if !virtio.Delete {
 		return errorDiskSlotDuplicate(slot)
 	}
+	virtio.Delete = false
 	switch schema[schemaType].(string) {
-	case schemaDisk:
+	case enumDisk:
 		if schema[schemaEmulateSSD].(bool) {
-			diags = append(diags, warningDisk(slot, schemaEmulateSSD, schemaSlot, slot, ""))
+			diags = diag.Diagnostics{warningDisk(slot, schemaEmulateSSD, schemaSlot, slot, "")}
 		}
 		if schema[schemaISO].(string) != "" {
 			diags = append(diags, warningDisk(slot, schemaISO, schemaSlot, slot, ""))
@@ -369,15 +380,17 @@ func sdk_Disk_QemuVirtIOStorage(virtio *pveAPI.QemuVirtIOStorage, schema map[str
 			virtio.Disk.Storage, tmpDiags = sdk_Disk_Storage(slot, schema)
 			diags = append(diags, tmpDiags...)
 			if schema[schemaDiskFile].(string) != "" {
-				diags = append(diags, warningDisk(slot, schemaDiskFile, schemaType, schemaDisk, ""))
+				diags = append(diags, warningDisk(slot, schemaDiskFile, schemaType, enumDisk, ""))
 			}
 		}
-	case schemaCdRom:
+	case enumCdRom:
 		virtio.CdRom, diags = sdk_Disk_QemuCdRom(slot, schema)
-	case schemaCloudInit:
+	case enumCloudInit:
 		return diag.Diagnostics{{
 			Severity: diag.Error,
 			Summary:  schemaVirtIO + " can't have " + schemaCloudInit + " disk"}}
+	case enumIgnore:
+		return WarningIgnore(slot, schema)
 	}
 	return
 }
@@ -421,7 +434,7 @@ func sdk_Disk_QemuVirtIODisks(virtio *pveAPI.QemuVirtIODisks, id string, schema 
 }
 
 func sdk_Disk_Size(slot string, schema map[string]interface{}) (pveAPI.QemuDiskSize, diag.Diagnostics) {
-	size := convert_SizeStringToKibibytes_Unsafe(schema[schemaSize].(string))
+	size := size.Parse_Unsafe(schema[schemaSize].(string))
 	if size == 0 {
 		return 0, diag.Diagnostics{{
 			Severity: diag.Error,

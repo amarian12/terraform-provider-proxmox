@@ -92,13 +92,14 @@ The following arguments are supported in the top level resource block.
 | Argument                      | Type     | Default Value        | Description |
 | ----------------------------- | -------- | -------------------- | ----------- |
 | `name`                        | `str`    |                      | **Required** The name of the VM within Proxmox. |
-| `target_node`                 | `str`    |                      | **Required** The name of the Proxmox Node on which to place the VM. |
-| `vmid`                        | `int`    | `0`                  | The ID of the VM in Proxmox. The default value of `0` indicates it should use the next available ID in the sequence. |
-| `desc`                        | `str`    |                      | The description of the VM. Shows as the 'Notes' field in the Proxmox GUI. |
+| `target_node`                 | `str`    |                      | The name of the PVE Node on which to place the VM.|
+| `target_nodes`                | `str`    |                      | A list of PVE node names on which to place the VM.|
+| `vmid`                        | `int`    |                      | The ID of the VM in Proxmox. When unset it should use the next available ID in the sequence. |
+| `description`                 | `str`    |                      | The description of the VM. Shows as the 'Notes' field in the Proxmox GUI. |
 | `define_connection_info`      | `bool`   | `true`               | Whether to let terraform define the (SSH) connection parameters for preprovisioners, see config block below. |
 | `bios`                        | `str`    | `"seabios"`          | The BIOS to use, options are `seabios` or `ovmf` for UEFI. |
-| `onboot`                      | `bool`   | `false`              | Whether to have the VM startup after the PVE node starts. |
-| `startup`                     | `string` | `""`                 | The [startup and shutdown behaviour](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#pct_startup_and_shutdown) |
+| `start_at_node_boot`          | `bool`   | `false`              | Whether the guest should start automatically when the Proxmox node boots.|
+| `startup_shutdown`            | `nested` |                      | Startup and shutdown configuration of the guest, see [Startup and Shutdown Reference](#startup-and-shutdown-reference).|
 | `vm_state`                    | `string` | `"running"`          | The desired state of the VM, options are `running`, `stopped` and `started`. Do note that `started` will only start the vm on creation and won't fully manage the power state unlike `running` and `stopped` do. |
 | `oncreate`                    | `bool`   | `true`               | Whether to have the VM startup after the VM is created (deprecated, use `vm_state` instead) |
 | `protection`                  | `bool`   | `false`              | Enable/disable the VM protection from being removed. The default value of `false` indicates the VM is removable. |
@@ -115,15 +116,12 @@ The following arguments are supported in the top level resource block.
 | `qemu_os`                     | `str`    | `"l26"`              | The type of OS in the guest. Set properly to allow Proxmox to enable optimizations for the appropriate guest OS. It takes the value from the source template and ignore any changes to resource configuration parameter. |
 | `memory`                      | `int`    | `512`                | The amount of memory to allocate to the VM in Megabytes. |
 | `balloon`                     | `int`    | `0`                  | The minimum amount of memory to allocate to the VM in Megabytes, when Automatic Memory Allocation is desired. Proxmox will enable a balloon device on the guest to manage dynamic allocation. See the [docs about memory](https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_memory) for more info. |
-| `sockets`                     | `int`    | `1`                  | The number of CPU sockets to allocate to the VM. |
-| `cores`                       | `int`    | `1`                  | The number of CPU cores per CPU socket to allocate to the VM. |
-| `vcpus`                       | `int`    | `0`                  | The number of vCPUs plugged into the VM when it starts. If `0`, this is set automatically by Proxmox to `sockets * cores`. |
-| `cpu`                         | `str`    | `"host"`             | The type of CPU to emulate in the Guest. See the [docs about CPU Types](https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_cpu) for more info. |
-| `numa`                        | `bool`   | `false`              | Whether to enable [Non-Uniform Memory Access](https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_cpu) in the guest. |
 | `hotplug`                     | `str`    | `"network,disk,usb"` | Comma delimited list of hotplug features to enable. Options: `network`, `disk`, `cpu`, `memory`, `usb`. Set to `0` to disable hotplug. |
 | `scsihw`                      | `str`    | `"lsi"`              | The SCSI controller to emulate. Options: `lsi`, `lsi53c810`, `megasas`, `pvscsi`, `virtio-scsi-pci`, `virtio-scsi-single`. |
 | `pool`                        | `str`    |                      | The resource pool to which the VM will be added. |
 | `tags`                        | `str`    |                      | Tags of the VM. Comma-separated values (e.g. `tag1,tag2,tag3`). Tag may not start with `-` and may only include the following characters: `[a-z]`, `[0-9]`, `_` and `-`. This is only meta information. |
+| `rng`                         | `struct` |                      | The RNG device to add to the VM, more info in [RNG Block](#rng-block) section. |
+| `tpm_state`                   | `struct` |                      | The TPM device to add to the VM, more info in [TPM Block](#tpm-block) section. |
 | `force_create`                | `bool`   | `false`              | If `false`, and a vm of the same name, on the same node exists, terraform will attempt to reconfigure that VM with these settings. Set to true to always create a new VM (note, the name of the VM must still be unique, otherwise an error will be produced.) |
 | `os_type`                     | `str`    |                      | Which provisioning method to use, based on the OS type. Options: `ubuntu`, `centos`, `cloud-init`. |
 | `force_recreate_on_change_of` | `str`    |                      | If the value of this string changes, the VM will be recreated. Useful for allowing this resource to be recreated when arbitrary attributes change. An example where this is useful is a cloudinit configuration (as the `cicustom` attribute points to a file not the content). |
@@ -139,12 +137,50 @@ The following arguments are supported in the top level resource block.
 | `searchdomain`                | `str`    |                      | Sets default DNS search domain suffix. |
 | `nameserver`                  | `str`    |                      | Sets default DNS server for guest. |
 | `sshkeys`                     | `str`    |                      | Newline delimited list of SSH public keys to add to authorized keys file for the cloud-init user. |
-| `ipconfig0`                   | `str`    | `''`                 | The first IP address to assign to the guest. Format: `[gw=<GatewayIPv4>] [,gw6=<GatewayIPv6>] [,ip=<IPv4Format/CIDR>] [,ip6=<IPv6Format/CIDR>]`. When `os_type` is `cloud-init` not setting `ip=` is equivalent to `skip_ipv4` == `true` and `ip6=` to `skip_ipv4` == `true` .|
+| `ipconfig0`                   | `str`    | `''`                 | The first IP address to assign to the guest. Format: `[gw=<GatewayIPv4>] [,gw6=<GatewayIPv6>] [,ip=<IPv4Format/CIDR>] [,ip6=<IPv6Format/CIDR>]`. When `os_type` is `cloud-init` not setting `ip=` is equivalent to `skip_ipv4` == `true` and `ip6=` to `skip_ipv6` == `true` .|
 | `ipconfig1` to `ipconfig15`   | `str`    |                      | The second IP address to assign to the guest. Same format as `ipconfig0`. |
-| `automatic_reboot`            | `bool`   | `true`               | Automatically reboot the VM when parameter changes require this. If disabled the provider will emit a warning when the VM needs to be rebooted. |
+| `automatic_reboot`            | `bool`   | `true`               | Automatically reboot the VM when parameter changes require this. If disabled the provider will emit a warning or error when the VM needs to be rebooted, this can be configured with `automatic_reboot_severity`.|
+| `automatic_reboot_severity`   | `string`  | `error`              | Sets the severity of the error/warning when `automatic_reboot` is `false`. Values can be `error` or `warning`.|
 | `skip_ipv4`                   | `bool`   | `false`              | Tells proxmox that acquiring an IPv4 address from the qemu guest agent isn't required, it will still return an ipv4 address if it could obtain one. Useful for reducing retries in environments without ipv4.|
 | `skip_ipv6`                   | `bool`   | `false`              | Tells proxmox that acquiring an IPv6 address from the qemu guest agent isn't required, it will still return an ipv6 address if it could obtain one. Useful for reducing retries in environments without ipv6.|
-| `agent_timeout`               | `int`    | `60`                 | Timeout in seconds to keep trying to obtain an IP address from the guest agent one we have a connection. |
+| `agent_timeout`               | `int`    | `90`                 | Timeout in seconds to keep trying to obtain an IP address from the guest agent one we have a connection. |
+| `current_node`                | `string` |                      | **Computed** The current node of the Qemu guest is on.|
+
+### CPU Block
+
+The `cpu` block is used to configure the CPU settings. It may be specified once.
+See the [docs about CPU](https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_cpu) for more details.
+
+| Argument  | Type  | Default Value | Description |
+| --------- | ----- | ------------- |:----------- |
+| `affinity`| `str` | `""`          | The CPU affinity for the Qemu guest. This is a comma separated list of values and ranges which define to which CPU cores the Qemu guest is bound. Example: `1,3-5`.|
+| `cores`   | `int` | `1`           | The number of CPU cores to allocate to the Qemu guest.|
+| `limit`   | `int` | `0`           | The CPU limit for the Qemu guest. `0` means unlimited.|
+| `numa`    | `bool`| `false`       | Whether to enable [Non-Uniform Memory Access](https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_cpu) in the Qemu guest.|
+| `sockets` | `int` | `1`           | The number of CPU sockets to allocate to the Qemu guest.|
+| `type`    | `str` | `"host"`      | The CPU type to emulate. See the [docs about CPU Types](https://pve.proxmox.com/pve-docs/chapter-qm.html#_cpu_type) for more info.|
+| `units`   | `int` | `0`        | The CPU units for the Qemu guest. This is a relative value which defines the CPU weight of the Qemu guest. The default value of `0` indicates the PVE default is used.|
+| `vcores`  | `int` | `0`        | The number of virtual cores exposed to the Qemu guest. If `0`, this is set automatically by Proxmox to `sockets * cores`.|
+| `flags`   | `list`|         | The CPU flags to enable for the Qemu guest. |
+
+#### CPU Flags Block
+
+The CPU flags to enable for the Qemu guest. A flag can be set with `on` ot `off`, when a flag isn't specified, it will be set to the default value in PVE and will be inherited from the `cpu.type`.
+
+| Argument     | Type | Description |
+| ------------ | ---- | ----------- |
+| `md_clear`   | `str`| Required to let the guest OS know if MDS is mitigated correctly.|
+| `pcid`       | `str`| Meltdown fix cost reduction on Westmere, Sandy-, and IvyBridge Intel CPUs.|
+| `spec_ctrl`  | `str`| Allows improved Spectre mitigation with Intel CPUs.|
+| `ssbd`       | `str`| Protection for "Speculative Store Bypass" for Intel models.|
+| `ibpb`       | `str`| Allows improved Spectre mitigation with AMD CPUs.|
+| `virt_ssbd`  | `str`| Basis for "Speculative Store Bypass" protection for AMD models.|
+| `amd_ssbd`   | `str`| Improves Spectre mitigation performance with AMD CPUs, best used with "virt-ssbd".|
+| `amd_no_ssb` | `str`| Notifies guest OS that host is not vulnerable for Spectre on AMD CPUs.|
+| `pbpe1gb`    | `str`| Allow guest OS to use 1GB size pages, if host HW supports it.|
+| `hv_tlbflush`| `str`| Improve performance in overcommitted Windows guests. May lead to guest bluescreens on old CPUs.|
+| `hv_evmcs`   | `str`| Improve performance for nested virtualization. Only supported on Intel CPUs.|
+| `aes`        | `str`| Activate AES instruction set for HW acceleration.|
 
 ### VGA Block
 
@@ -173,7 +209,7 @@ details.
 | `model`     | `str`  |               | **Required** Network Card Model. The virtio model provides the best performance with very low CPU overhead. If your guest does not support this driver, it is usually best to use e1000. Options: `e1000`, `e1000-82540em`, `e1000-82544gc`, `e1000-82545em`, `i82551`, `i82557b`, `i82559er`, `ne2k_isa`, `ne2k_pci`, `pcnet`, `rtl8139`, `virtio`, `vmxnet3`. |
 | `macaddr`   | `str`  |               | Override the randomly generated MAC Address for the VM. Requires the MAC Address be Unicast.  |
 | `bridge`    | `str`  | `"nat"`       | Bridge to which the network device should be attached. The Proxmox VE standard bridge is called `vmbr0`. |
-| `tag`       | `int`  | `-1`          | The VLAN tag to apply to packets on this device. `-1` disables VLAN tagging. |
+| `tag`       | `int`  | `0`           | The VLAN tag to apply to packets on this device. `0` disables VLAN tagging. |
 | `firewall`  | `bool` | `false`       | Whether to enable the Proxmox firewall on this network device. |
 | `mtu`       | `int`  |               | The MTU value for the network device. On ``virtio`` models, set to ``1`` to inherit the MTU value from the underlying bridge. |
 | `rate`      | `int`  | `0`           | Network device rate limit in mbps (megabytes per second) as floating point number. Set to `0` to disable rate limiting. |
@@ -183,6 +219,8 @@ details.
 ### Disk Block
 
 The `disk` block is used to configure the disk devices. It may be specified multiple times. This block does not diff as pretty as the `disks` block, but it is more flexible for modules. Putting the disks in alphanumeric order based on the value of `slot` is recommended for readability.
+
+For `type` there is a special `ignore` value. This will tell Terraform to not manage the disk in that slot, useful when another tool manages the disks.
 
 Due to the complexity of the `disk` block, there is a settings matrix that can be found in the [Disk compatibility matrix](#disk-compatibility-matrix).
 
@@ -214,10 +252,21 @@ Due to the complexity of the `disk` block, there is a settings matrix that can b
 |`replicate`           |`bool`  |`false`|Whether the drive should considered for replication jobs.|
 |`serial`              |`string`|       |The serial number of the disk.|
 |`size`                |`string`|       |The size of the created disk. Accepts `K` for kibibytes, `M` for mebibytes, `G` for gibibytes, `T` for tibibytes. When only a number is provided gibibytes is assumed. **Required** when `type`=`disk` and `passthrough`=`false`, **Computed** when `type`=`disk` and `passthrough`=`true`. |
-|`slot`                |`string`|       |**Required** The slot id of the disk.|
+|`slot`                |`string`|       |**Required** The slot id of the disk - must be one of 'ide0', 'ide1', 'ide2', 'sata0', 'sata1', 'sata2', 'sata3', 'sata4', 'sata5', 'scsi0', 'scsi1', 'scsi2', 'scsi3', 'scsi4', 'scsi5', 'scsi6', 'scsi7', 'scsi8', 'scsi9', 'scsi10', 'scsi11', 'scsi12', 'scsi13', 'scsi14', 'scsi15', 'scsi16', 'scsi17', 'scsi18', 'scsi19', 'scsi20', 'scsi21', 'scsi22', 'scsi23', 'scsi24', 'scsi25', 'scsi26', 'scsi27', 'scsi28', 'scsi29', 'scsi30', 'virtio0', 'virtio1', 'virtio2', 'virtio3', 'virtio4', 'virtio5', 'virtio6', 'virtio7', 'virtio8', 'virtio9', 'virtio10', 'virtio11', 'virtio12', 'virtio13', 'virtio14', 'virtio15'|
 |`storage`             |`string`|       |Required when `type`=`disk` and `passthrough`=`false`. The name of the storage pool on which to store the disk.|
-|`type`                |`string`|`disk` |The type of disk to create. Options: `cdrom`, `cloudinit` ,`disk`.|
+|`type`                |`string`|`disk` |The type of disk to create. Options: `cdrom`, `cloudinit` ,`disk` ,`ignore`.|
 |`wwn`                 |`string`|       |The WWN of the disk.|
+
+Example `Disk block` using an existing vm as a template.
+
+```hcl
+disk {
+  type        = "disk"
+  disk_file   = "local-lvm:vm-<<<vmid>>>-disk-<<<disk number>>>"
+  passthrough = true
+  slot        = "scsi0"
+}
+```
 
 #### Disk compatibility matrix
 
@@ -260,9 +309,12 @@ Due to the complexity of the `disk` block, there is a settings matrix that can b
 
 The `disks` block is used to configure the disk devices. It may be specified once. There are four types of disk `ide`,`sata`,`scsi` and `virtio`. Configuration for these sub types can be found in their respective chapters:
 
-* `cdrom`: [Disks.x.Cdrom Block](#disksxcdrom-block).
-* `disk`: [Disks.x.Disk Block](#disksxdisk-block).
-* `passthrough`: [Disks.x.Passthrough Block](#disksxpassthrough-block).
+* `ide`: [Disks.Ide Block](#diskside-block).
+* `sata`: [Disks.Sata Block](#diskssata-block).
+* `scsi`: [Disks.Scsi Block](#disksscsi-block).
+* `virtio`: [Disks.Virtio Block](#disksvirtio-block).
+
+For each disk slot there is a special `ignore` setting that can be set to `true`. This will tell Terraform to not manage the disk in that slot, useful when another tool manages the disks.
 
 ```hcl
 resource "proxmox_vm_qemu" "resource-name" {
@@ -287,7 +339,7 @@ resource "proxmox_vm_qemu" "resource-name" {
 
 ### Disks.Ide Block
 
-The `disks.ide` block is used to configure disks of type ide. It may only be specified once. It has the options `ide0` through `ide3`. Each disk can have only one of the following mutually exclusive sub types `cdrom`, `cloudinit`, `disk`, `passthrough`. Configuration for these sub types can be found in their respective chapters:
+The `disks.ide` block is used to configure disks of type ide. It may only be specified once. It has the options `ide0` through `ide3`. Each disk can have only one of the following mutually exclusive sub types `cdrom`, `cloudinit`, `disk`, `passthrough`, `ignore`. Configuration for these sub types can be found in their respective chapters:
 
 * `cdrom`: [Disks.x.Cdrom Block](#disksxcdrom-block).
 * `cloudinit`: [Disks.x.Cloudinit Block](#disksxcloudinit-block).
@@ -328,7 +380,7 @@ resource "proxmox_vm_qemu" "resource-name" {
 
 ### Disks.Sata Block
 
-The `disks.sata` block is used to configure disks of type sata. It may only be specified once. It has the options `sata0` through `sata5`. Each disk can have only one of the following mutually exclusive sub types `cdrom`, `cloudinit`, `disk`, `passthrough`. Configuration for these sub types can be found in their respective chapters:
+The `disks.sata` block is used to configure disks of type sata. It may only be specified once. It has the options `sata0` through `sata5`. Each disk can have only one of the following mutually exclusive sub types `cdrom`, `cloudinit`, `disk`, `passthrough`, `ignore`. Configuration for these sub types can be found in their respective chapters:
 
 * `cdrom`: [Disks.x.Cdrom Block](#disksxcdrom-block).
 * `cloudinit`: [Disks.x.Cloudinit Block](#disksxcloudinit-block).
@@ -361,6 +413,9 @@ resource "proxmox_vm_qemu" "resource-name" {
           //<arguments omitted for brevity...>
         }
       }
+      sata4 {
+        ignore = true
+      }
       //<arguments omitted for brevity...>
     }
     //<arguments omitted for brevity...>
@@ -370,7 +425,7 @@ resource "proxmox_vm_qemu" "resource-name" {
 
 ### Disks.Scsi Block
 
-The `disks.scsi` block is used to configure disks of type scsi. It may only be specified once. It has the options `scsi0` through `scsi30`. Each disk can have only one of the following mutually exclusive sub types `cdrom`, `cloudinit`, `disk`, `passthrough`. Configuration for these sub types can be found in their respective chapters:
+The `disks.scsi` block is used to configure disks of type scsi. It may only be specified once. It has the options `scsi0` through `scsi30`. Each disk can have only one of the following mutually exclusive sub types `cdrom`, `cloudinit`, `disk`, `passthrough` `ignore`. Configuration for these sub types can be found in their respective chapters:
 
 * `cdrom`: [Disks.x.Cdrom Block](#disksxcdrom-block).
 * `cloudinit`: [Disks.x.Cloudinit Block](#disksxcloudinit-block).
@@ -403,6 +458,9 @@ resource "proxmox_vm_qemu" "resource-name" {
           //<arguments omitted for brevity...>
         }
       }
+      scsi4 {
+        ignore = true
+      }
       //<arguments omitted for brevity...>
     }
     //<arguments omitted for brevity...>
@@ -412,7 +470,7 @@ resource "proxmox_vm_qemu" "resource-name" {
 
 ### Disks.Virtio Block
 
-The `disks.virtio` block is used to configure disks of type virtio. It may only be specified once. It has the options `virtio0` through `virtio15`. Each disk can have only one of the following mutually exclusive sub types `cdrom`, `disk`, `passthrough`. Configuration for these sub types can be found in their respective chapters:
+The `disks.virtio` block is used to configure disks of type virtio. It may only be specified once. It has the options `virtio0` through `virtio15`. Each disk can have only one of the following mutually exclusive sub types `cdrom`, `disk`, `passthrough`, `ignore`. Configuration for these sub types can be found in their respective chapters:
 
 * `cdrom`: [Disks.x.Cdrom Block](#disksxcdrom-block).
 * `disk`: [Disks.x.Disk Block](#disksxdisk-block).
@@ -438,6 +496,9 @@ resource "proxmox_vm_qemu" "resource-name" {
         passthrough {
           //<arguments omitted for brevity...>
         }
+      }
+      virtio3 {
+        ignore = true
       }
       //<arguments omitted for brevity...>
     }
@@ -540,10 +601,88 @@ resource "proxmox_vm_qemu" "resource-name" {
 
 See the [docs about EFI disks](https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_bios_and_uefi) for more details.
 
-| Argument  | Type  | Default Value | Description                                                           |
-| --------- | ----- | ------------- | --------------------------------------------------------------------- |
-| `efitype` | `str` | `"4m"`        | The type of efi disk device to add. Options: `2m`, `4m`               |
-| `storage` | `str` |               | **Required** The name of the storage pool on which to store the disk. |
+| Argument            | Type   | Default Value | Description                                                           |
+| ------------------- | ------ | ------------- | --------------------------------------------------------------------- |
+| `pre_enrolled_keys` | `bool` | `false`       | Whether or not to pre-enroll secure boot keys and thus enable secure boot |
+| `efitype`           | `str`  | `"4m"`        | The type of efi disk device to add. Options: `2m`, `4m`               |
+| `storage`           | `str`  |               | **Required** The name of the storage pool on which to store the disk. |
+
+### PCI Block
+
+The `pci` block is used to configure PCI devices. It may be specified multiple times.
+Don't need it in a module? Use the [PCIs Block](#pcis-block) instead.
+
+| Argument        | Type   | Default Value | Description |
+| :-------------- | :----: | :-----------: | :---------- |
+| `id`            | `str`  |               | **Required** The id of the PCI device. Range `0` - `15`. |
+| `mapping_id`    | `str`  |               | **Required\*** The id of the mapping. Conflicts with `raw_id`.|
+| `raw_id`        | `str`  |               | **Required\*** The id of the raw device. Conflicts with `mapping_id`.|
+| `pcie`          | `bool` | `false`       | Whether this device is a `PCIe` device. |
+| `primary_gpu`   | `bool` | `false`       | Whether this PCI device is the primary GPU. |
+| `rombar`        | `bool` | `true`        | Whether to enable the ROM-BAR. |
+| `device_id`     | `str`  |               | The device id of the PCI device. |
+| `vendor_id`     | `str`  |               | The vendor id of the PCI device. |
+| `sub_device_id` | `str`  |               | The sub device id of the PCI device. |
+| `sub_vendor_id` | `str`  |               | The sub vendor id of the PCI device. |
+| `mdev`          | `str`  |               | The mediated device. |
+
+\* Either `mapping_id` or `raw_id` is required.
+
+### PCIs Block
+
+The `pcis` block is used to configure PCI devices.
+There are two types of PCI devices `mapping`, and `raw`. Each of these types has their own block with their own arguments.
+
+These types share the following arguments, with minor differences:
+
+| Argument        | Type   | Default Value | PCI types        |Description |
+| :-------------- | :----: | :-----------: | :--------------: | :--------- |
+| `mapping_id`    | `str`  |               | `mapping`        | **Required** The id of the mapping. |
+| `raw_id`        | `str`  |               | `raw`            | **Required** The id of the raw device. |
+| `pcie`          | `bool` | `false`       | `mapping`, `raw` | Whether this device is a `PCIe` device. |
+| `primary_gpu`   | `bool` | `false`       | `mapping`, `raw` | Whether this PCI device is the primary GPU. |
+| `rombar`        | `bool` | `true`        | `mapping`, `raw` | Whether to enable the ROM-BAR. |
+| `device_id`     | `str`  |               | `mapping`, `raw` | The device id of the PCI device. |
+| `vendor_id`     | `str`  |               | `mapping`, `raw` | The vendor id of the PCI device. |
+| `sub_device_id` | `str`  |               | `mapping`, `raw` | The sub device id of the PCI device. |
+| `sub_vendor_id` | `str`  |               | `mapping`, `raw` | The sub vendor id of the PCI device. |
+| `mdev`          | `str`  |               | `mapping`, `raw` | The mediated device. |
+
+The range of pci devices is from `pci0` to `pci15`.
+
+Example:
+
+```hcl
+resource "proxmox_vm_qemu" "resource-name" {
+  // ...
+  pcis {
+    pci0 {
+      mapping {
+        mapping_id = "mapping-id"
+        pcie = true
+        primary_gpu = true
+        rombar = true
+        device_id = "device-id"
+        vendor_id = "vendor-id"
+        sub_device_id = "sub-device-id"
+        sub_vendor_id = "sub-vendor-id"
+      }
+    }
+    pci15 {
+      raw {
+        raw_id = "raw-id"
+        pcie = true
+        primary_gpu = true
+        rombar = true
+        device_id = "device-id"
+        vendor_id = "vendor-id"
+        sub_device_id = "sub-device-id"
+        sub_vendor_id = "sub-vendor-id"
+      }
+    }
+  }
+}
+```
 
 ### Serial Block
 
@@ -558,6 +697,15 @@ details.
 | -------- | ----- | ------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `id`     | `int` |               | **Required** The ID of the serial device. Must be unique, and between `0-3`.                                           |
 | `type`   | `str` | `socket`      | The type of serial device to create. Options: `socket`, or the path to a serial device like `/dev/ttyS0`. |
+
+### TPM Block
+
+The `tpm_state` block is used to configure a TPM disk. It may only be specified once.
+
+| Argument | Type | Default Value | Description |
+| -------- | ---- | ------------- | ----------- |
+| `storage`| `str`|               | **Required** The name of the storage backend on which to store the TPM disk.|
+| `version`| `str`| `v2.0`        | The version of the TPM to use. Options: `v1.2`, `v2.0`.|
 
 ### USB Block
 
@@ -645,6 +793,26 @@ resource "proxmox_vm_qemu" "resource-name" {
 | -------- | ------ | ------------- | ----------- |
 | `usb3`   | `bool` | `false`       | Specifies whether the USB device or port is USB3. |
 
+### RNG Block
+
+The `rng` block is used to configure a random number generator device. It can only be specified once.
+
+| Argument | Type     | Default Value | Description |
+| -------- | -------- | ------------- | ----------- |
+| `limit`  | `int`    | `1024`        | The maximum number of bytes per `period` to read from the RNG device.|
+| `period` | `int`    |               | The period in milliseconds to read from the RNG device. `0` for unlimited.|
+| `source` | `string` | `/dev/urandom`| The source of the random number generator. Options: `/dev/random`, `/dev/urandom`, `/dev/hwrng`. |
+
+### Startup and Shutdown Reference
+
+The `startup_shutdown` field is used to configure the startup and shutdown settings. It may only be specified once.
+
+| Argument            | Type | Default Value | Description |
+|:--------------------|------|---------------|:------------|
+| `order`             | `int`| `-1`          | Startup order `-1` means any.|
+| `shutdown_timeout`  | `int`| `-1`          | Shutdown timeout in seconds, `-1` means default.|
+| `startup_delay`     | `int`| `-1`          | Startup delay in seconds, `-1` means default.|
+
 ## SMBIOS Block
 
 The `smbios` block sets SMBIOS type 1 settings for the VM.
@@ -675,5 +843,15 @@ In addition to the arguments above, the following attributes can be referenced f
 A VM Qemu Resource can be imported using its node, type and VM ID i.e.:
 
 ```bash
-terraform import [options] [node]/[type]/[vmId]
+ terraform [global options] import [options] ADDRESS <node>/<type>/<vmId>
 ```
+
+`ADDRESS` must correspond to a resource block. `<type>` will always be `qemu` for VMs.
+
+#### Example
+
+> Creating a VM via the Proxmox GUI Wizard and importing it to Terraform to understand how different options maps to Terraform config code
+
+1. Create a dummy file, e.g. `test.tf`, containing a dummy resource block `resource "proxmox_vm_qemu" "import_test" { }`
+2. Run the Terraform import `terraform import proxmox_vm_qemu.import_test mynode/qemu/106`
+3. The state gets imported to your `terraform.tfstate`, you can open that file and explore the imported state as Terraform config code

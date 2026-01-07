@@ -17,7 +17,7 @@ const (
 
 	prefixSchemaID string = "usb"
 
-	maximumUSBs int = int(pveAPI.QemuUSBsAmount)
+	amountUSBs int = int(pveAPI.QemuUSBsAmount)
 
 	schemaID string = "id"
 
@@ -38,7 +38,7 @@ func SchemaUSB() *schema.Schema {
 	return &schema.Schema{
 		Type:          schema.TypeList,
 		Optional:      true,
-		MaxItems:      maximumUSBs,
+		MaxItems:      amountUSBs,
 		ConflictsWith: []string{RootUSBs},
 		Elem: &schema.Resource{
 			Schema: map[string]*schema.Schema{
@@ -51,7 +51,9 @@ func SchemaUSB() *schema.Schema {
 							return diag.Errorf(validator.ErrorUint, k)
 						}
 						if err := pveAPI.QemuUsbID(v).Validate(); err != nil {
-							return diag.Errorf(err.Error())
+							return diag.Diagnostics{{
+								Severity: diag.Error,
+								Summary:  err.Error()}}
 						}
 						return nil
 					},
@@ -71,7 +73,7 @@ func SchemaUSB() *schema.Schema {
 
 func SchemaUSBs() *schema.Schema {
 	schemaItems := make(map[string]*schema.Schema)
-	for i := 0; i < maximumUSBs; i++ {
+	for i := 0; i < amountUSBs; i++ {
 		id := strconv.Itoa(i)
 		schemaItems[prefixSchemaID+id] = usbsSubSchema(prefixSchemaID + id)
 	}
@@ -145,7 +147,9 @@ func subSchemaDeviceID(s schema.Schema) *schema.Schema {
 			return diag.Errorf(validator.ErrorString, k)
 		}
 		if err := pveAPI.UsbDeviceID(v).Validate(); err != nil {
-			return diag.Errorf(err.Error())
+			return diag.Diagnostics{{
+				Severity: diag.Error,
+				Summary:  err.Error()}}
 		}
 		return nil
 	}
@@ -160,7 +164,9 @@ func subSchemaMappingID(s schema.Schema) *schema.Schema {
 			return diag.Errorf(validator.ErrorString, k)
 		}
 		if err := pveAPI.ResourceMappingUsbID(v).Validate(); err != nil {
-			return diag.Errorf(err.Error())
+			return diag.Diagnostics{{
+				Severity: diag.Error,
+				Summary:  err.Error()}}
 		}
 		return nil
 	}
@@ -175,7 +181,9 @@ func subSchemaPortID(s schema.Schema) *schema.Schema {
 			return diag.Errorf(validator.ErrorString, k)
 		}
 		if err := pveAPI.UsbPortID(v).Validate(); err != nil {
-			return diag.Errorf(err.Error())
+			return diag.Diagnostics{{
+				Severity: diag.Error,
+				Summary:  err.Error()}}
 		}
 		return nil
 	}

@@ -7,22 +7,17 @@ import (
 	"os"
 	"regexp"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
-	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
+	pveSDK "github.com/Telmate/proxmox-api-go/proxmox"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/rs/zerolog"
 )
 
-// const defaultTimeout = 300
-
-var rxRsId = regexp.MustCompile(`([^/]+)/([^/]+)/(\d+)`)
+const defaultDescription = "Managed by Terraform."
 
 var rxClusterRsId = regexp.MustCompile(`([^/]+)/([^/]+)`)
-
-var macAddressRegex = regexp.MustCompile(`([a-fA-F0-9]{2}:){5}[a-fA-F0-9]{2}`)
 
 var machineModelsRegex = regexp.MustCompile(`(^pc|^q35|^virt)`)
 
@@ -223,7 +218,7 @@ func CreateSubLogger(loggerName string) (zerolog.Logger, error) {
 }
 
 func UpdateDeviceConfDefaults(
-	activeDeviceConf pxapi.QemuDevice,
+	activeDeviceConf pveSDK.QemuDevice,
 	defaultDeviceConf *schema.Set,
 ) *schema.Set {
 	defaultDeviceConfMap := defaultDeviceConf.List()[0].(map[string]interface{})
@@ -247,8 +242,8 @@ func UpdateDeviceConfDefaults(
 	return defaultDeviceConf
 }
 
-func DevicesSetToMapWithoutId(devicesSet *schema.Set) pxapi.QemuDevices {
-	devicesMap := pxapi.QemuDevices{}
+func DevicesSetToMapWithoutId(devicesSet *schema.Set) pveSDK.QemuDevices {
+	devicesMap := pveSDK.QemuDevices{}
 	i := 1
 	for _, set := range devicesSet.List() {
 		setMap, isMap := set.(map[string]interface{})
@@ -261,7 +256,7 @@ func DevicesSetToMapWithoutId(devicesSet *schema.Set) pxapi.QemuDevices {
 	return devicesMap
 }
 
-type KeyedDeviceMap map[interface{}]pxapi.QemuDevice
+type KeyedDeviceMap map[interface{}]pveSDK.QemuDevice
 
 func DevicesListToMapByKey(devicesList []interface{}, key string) KeyedDeviceMap {
 	devicesMap := KeyedDeviceMap{}
@@ -276,14 +271,14 @@ func DevicesListToMapByKey(devicesList []interface{}, key string) KeyedDeviceMap
 	return devicesMap
 }
 
-func DeviceToMap(device pxapi.QemuDevice, key interface{}) KeyedDeviceMap {
+func DeviceToMap(device pveSDK.QemuDevice, key interface{}) KeyedDeviceMap {
 	kdm := KeyedDeviceMap{}
 	kdm[key] = device
 	return kdm
 }
 
-func DevicesListToDevices(devicesList []interface{}, key string) pxapi.QemuDevices {
-	devicesMap := pxapi.QemuDevices{}
+func DevicesListToDevices(devicesList []interface{}, key string) pveSDK.QemuDevices {
+	devicesMap := pveSDK.QemuDevices{}
 	for key, set := range DevicesListToMapByKey(devicesList, key) {
 		devicesMap[key.(int)] = set
 	}
@@ -291,7 +286,7 @@ func DevicesListToDevices(devicesList []interface{}, key string) pxapi.QemuDevic
 }
 
 func AssertNoNonSchemaValues(
-	devices pxapi.QemuDevices,
+	devices pveSDK.QemuDevices,
 	schemaDef *schema.Schema,
 ) error {
 	// add an explicit check that the keys in the config.QemuNetworks map are a strict subset of
@@ -313,7 +308,7 @@ func AssertNoNonSchemaValues(
 // Further parses a QemuDevice by normalizing types
 func adaptDeviceToConf(
 	conf map[string]interface{},
-	device pxapi.QemuDevice,
+	device pveSDK.QemuDevice,
 ) map[string]interface{} {
 	// Value type should be one of types allowed by Terraform schema types.
 	for key, value := range device {
@@ -359,12 +354,14 @@ func resourceDataToFlatValues(d *schema.ResourceData, resource *schema.Resource)
 		case schema.TypeFloat:
 			flatValues[key] = d.Get(key).(float64)
 		case schema.TypeSet:
-			values, _ := schemaSetToFlatValues(d.Get(key).(*schema.Set), value.Elem.(*schema.Resource))
-			flatValues[key] = values
+			if _, ok := value.Elem.(*schema.Schema); ok {
+				flatValues[key] = value.Elem.(*schema.Schema)
+			} else {
+				values, _ := schemaSetToFlatValues(d.Get(key).(*schema.Set), value.Elem.(*schema.Resource))
+				flatValues[key] = values
+			}
 		case schema.TypeList:
-			_, ok := value.Elem.(*schema.Schema)
-
-			if ok {
+			if _, ok := value.Elem.(*schema.Schema); ok {
 				flatValues[key] = value.Elem.(*schema.Schema)
 			} else {
 				values, _ := schemaListToFlatValues(d.Get(key).([]interface{}), value.Elem.(*schema.Resource))
@@ -512,18 +509,4 @@ func ByteCountIEC(b int64) string {
 	}
 	return fmt.Sprintf("%0.f%c",
 		float64(b)/float64(div), "KMGTPE"[exp])
-}
-
-func splitStringOfSettings(settings string) map[string]string {
-	settingValuePairs := strings.Split(settings, ",")
-	settingMap := map[string]string{}
-	for _, e := range settingValuePairs {
-		keyValuePair := strings.SplitN(e, "=", 2)
-		var value string
-		if len(keyValuePair) == 2 {
-			value = keyValuePair[1]
-		}
-		settingMap[keyValuePair[0]] = value
-	}
-	return settingMap
 }

@@ -14,8 +14,8 @@ import (
 
 // Converts the Terraform configuration to the SDK configuration
 func SDK(d *schema.ResourceData) (pveAPI.QemuNetworkInterfaces, diag.Diagnostics) {
-	networks := make(pveAPI.QemuNetworkInterfaces, maximumNetworkInterfaces)
-	for i := 0; i < maximumNetworkInterfaces; i++ {
+	networks := make(pveAPI.QemuNetworkInterfaces, AmountNetworkInterfaces)
+	for i := 0; i < AmountNetworkInterfaces; i++ {
 		networks[pveAPI.QemuNetworkInterfaceID(i)] = pveAPI.QemuNetworkInterface{Delete: true}
 	}
 	var diags diag.Diagnostics
@@ -34,7 +34,7 @@ func SDK(d *schema.ResourceData) (pveAPI.QemuNetworkInterfaces, diag.Diagnostics
 		if mtu != 0 {
 			if string(pveAPI.QemuNetworkModelVirtIO) == model.String() {
 				if mtu == 1 {
-					tmpMTU = pveAPI.QemuMTU{Inherit: false}
+					tmpMTU = pveAPI.QemuMTU{Inherit: true}
 				} else {
 					tmpMTU = pveAPI.QemuMTU{Value: pveAPI.MTU(mtu)}
 				}
@@ -53,9 +53,10 @@ func SDK(d *schema.ResourceData) (pveAPI.QemuNetworkInterfaces, diag.Diagnostics
 			Firewall:      util.Pointer(networkMap[schemaFirewall].(bool)),
 			MAC:           &tmpMAC,
 			MTU:           &tmpMTU,
+			NativeVlan:    util.Pointer(pveAPI.Vlan(networkMap[schemaNativeVlan].(int))),
 			Model:         util.Pointer(model),
 			MultiQueue:    util.Pointer(pveAPI.QemuNetworkQueue(networkMap[schemaQueues].(int))),
-			RateLimitKBps: util.Pointer(pveAPI.QemuNetworkRate(rate))}
+			RateLimitKBps: util.Pointer(pveAPI.GuestNetworkRate(rate))}
 	}
 	return networks, diags
 }
